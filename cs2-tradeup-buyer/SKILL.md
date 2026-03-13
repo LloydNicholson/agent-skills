@@ -63,6 +63,19 @@ Never fail just because names differ; use tool descriptions + schemas to pick th
 
 ## Workflow
 
+### Overview
+
+The skill executes this deterministic loop:
+1. Parse user input → get parameters
+2. Find ONE trade-up opportunity
+3. Scout ALL inputs for that opportunity (with systematic alternatives)
+4. If ANY input group fails → report specific failure + ask user if they want to try a different trade-up
+5. If ALL input groups succeed → proceed to confirmation & purchase
+
+**Key principle:** You are scouting ONE trade-up completely before moving to the next. Do not auto-switch trade-ups. Ask the user first.
+
+---
+
 ### Step 0 — Parse user target selector
 
 Extract these request controls from the prompt:
@@ -174,22 +187,85 @@ PAGINATION_LOOP:
 
 Each listing has: `listingId`, `itemName`, `float`, `price`, `subtotalCents`, `feeCents`
 
-#### 2d. Shortfall handling (if collected < needed)
+#### 2d. Shortfall handling (systematic alternatives)
 
-After pagination exhausted:
-- Check `input.AlternativeSkins` (same collection/rarity)
-- For each alternative, repeat pagination (Step 2a-b) with:
-  - `maxFloat` = alternative.maxItemFloat
-  - `maxPrice` = alternative.maxPrice
-- Continue until input group satisfied
+After primary item pagination exhausted (collected < needed):
 
-#### 2e. No listings found
+```
+collected = X (< input.Count)
+alternatives = input.AlternativeSkins (ordered list, same collection/rarity)
 
-If input group has 0 listings across all pages and alternatives, trade-up cannot execute. Warn user and suggest trying different trade-up with higher budget or looser constraints.
+FOR EACH alternative IN alternatives:
+  IF (collected >= input.Count):
+    → Input group satisfied. BREAK.
+
+  collected_from_alt = pagination(alternative.itemName, alt.maxFloat, alt.maxPrice)
+  collected += collected_from_alt
+
+  IF (collected >= input.Count):
+    → Input group satisfied. Return collected.
+
+END FOR
+
+IF (collected < input.Count after all alternatives):
+  → Input group FAILED.
+    Return: { status: "FAILED", collected: X, needed: input.Count, attempted: [primary + all alternatives] }
+```
+
+**Important:** If any alternative fails to produce ANY listings (0 collected across all pages), still try the next alternative. Exhausting all alternatives is what matters.
+
+#### 2e. Input group failure → Trade-up abort decision
+
+If ANY input group returns FAILED status:
+
+1. **Report the failure clearly:**
+   ```
+   ❌ Trade-Up #24986065 CANNOT BE EXECUTED
+
+   Input Group: 3x MAC-10 | Acid Hex (Minimal Wear)
+   - Required: 3 items
+   - Found: 0 items
+   - Constraint: float ≤0.0812, price ≤R2.48
+   - Attempted:
+     ✗ MAC-10 | Acid Hex (primary): 0 listings on pages 1-2
+     ✗ Galil AR | Acid Dart (alt 1): 0 listings on page 1
+     ✗ P90 | Mustard Gas (alt 2): 0 listings on pages 1-2
+     ✗ [... all alternatives exhausted]
+
+   Reason: Current market prices exceed opportunity constraints.
+   ```
+
+2. **Ask user explicitly:**
+   ```
+   Would you like to:
+   A) Try a different trade-up (I'll pick the next best opportunity)
+   B) Increase budget and retry (specify new maxCost)
+   C) Abort
+   ```
+
+3. **Do NOT auto-switch.** Wait for user input before proceeding to a different trade-up.
+
+---
+
+### Step 2-final — Validate completeness
+
+After Step 2 completes (all input groups have been scouted):
+
+```
+FOR EACH input_group IN opportunity.inputs:
+  IF input_group.status == "FAILED":
+    → Jump to Step 2e (failure handling)
+    → Do not proceed to Step 3.
+
+IF all input_groups.status == "COLLECTED":
+  → Proceed to Step 3 (confirmation).
+```
 
 ---
 
 ### Step 3 — Report findings and ask for confirmation
+
+**You only reach this step if ALL input groups were successfully sourced** (validated in Step 2-final).
 
 Show a clear pre-purchase summary:
 
