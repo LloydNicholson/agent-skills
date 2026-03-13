@@ -3,67 +3,21 @@
   "evals": [
     {
       "id": 1,
-      "name": "pagination-pages-1-2-empty",
-      "prompt": "Find and execute a trade-up under R5 with maxDifficulty 3",
-      "expected_output": "Pagination continues past pages 1-2 if empty (doesn't assume market exhausted). State table shows pages 1-2 as consecutive_empty=1 and =2, then page 3+ is attempted.",
-      "assertions": [
-        {
-          "name": "state_table_shown",
-          "description": "Pagination state table is displayed in response showing all pages attempted"
-        },
-        {
-          "name": "pages_beyond_2_attempted",
-          "description": "Must attempt page 3+ even if pages 1-2 return 0 results"
-        },
-        {
-          "name": "consecutive_empty_tracked",
-          "description": "Consecutive empty count increments correctly and is shown in state table"
-        },
-        {
-          "name": "no_early_abandonment",
-          "description": "Does NOT stop at page 1 or 2 with excuse like 'prices too high' or 'floats above ceiling'"
-        }
-      ]
+      "prompt": "Find and scout inputs for a trade-up under R5 with difficulty at most 4. Focus on one with tight float constraints that will require persistent pagination. IMPORTANT: Skill has NO page limit. Page as far as needed (50+ pages OK) until goal or price ceiling.",
+      "expected_output": "Scouts all inputs with UNLIMITED pagination (no page 15 limit). Pages 50+ if needed. Logs every page. Only stops when: goal reached OR all items exceed price.",
+      "files": []
     },
     {
       "id": 2,
-      "name": "pagination-reaches-page-15",
-      "prompt": "Scout a difficult trade-up (use maxDifficulty 2) under R8. Show me pagination state for all pages attempted.",
-      "expected_output": "If market is exhausted before goal is met, must attempt pages up to and including page 15. State table shows pages 1-15 (or stops earlier only if: (a) goal reached, (b) 2+ consecutive empties after page 2).",
-      "assertions": [
-        {
-          "name": "page_15_attempted_or_justified",
-          "description": "Either reaches page 15 OR provides explicit reason why stopped earlier (goal met / 2+ consecutive empties)"
-        },
-        {
-          "name": "sequential_paging",
-          "description": "Pages are attempted in order: 1, 2, 3, ... not jumping around"
-        },
-        {
-          "name": "stop_reason_logged",
-          "description": "Final pagination report includes explicit stop reason (e.g., 'Goal reached on page 8' or 'Page 15 safety limit' or '3 consecutive empties')"
-        }
-      ]
+      "prompt": "Scout MP9 | Sand Dashed (Minimal Wear) with max price R1.00. This is a cheap skin — you'll need to page through many expensive listings to find good floats.",
+      "expected_output": "Pages aggressively (25+ pages), logs every page, eventually hits price ceiling or collects goal. Does not stop before page 20.",
+      "files": []
     },
     {
       "id": 3,
-      "name": "pagination-tight-constraints",
-      "prompt": "Execute a trade-up under R12 with maxDifficulty 4. If first pages show no results due to tight float/price constraints, continue paging past page 1-2.",
-      "expected_output": "Pagination state table shows continued paging even when pages 1-2 have 0 results. Does not make excuse like 'floats are 0.24+ but constraint is 0.18, so market doesn't have it'.",
-      "assertions": [
-        {
-          "name": "continues_past_zero_pages",
-          "description": "Pages 3+ are attempted if pages 1-2 return 0 (does not abandon on page 2)"
-        },
-        {
-          "name": "no_constraint_excuse",
-          "description": "Does not stop early with reasoning like 'all items exceed float constraint on page 1 therefore no point continuing'"
-        },
-        {
-          "name": "pages_logged",
-          "description": "Every page 1-N is visible in state table (not condensed to summary)"
-        }
-      ]
+      "prompt": "Scout an item where price ceiling is quickly hit (try to find something under R0.50). Verify we stop correctly when all listings exceed price.",
+      "expected_output": "Detects price ceiling, stops pagination with clear message, does not continue needlessly",
+      "files": []
     }
   ]
 }

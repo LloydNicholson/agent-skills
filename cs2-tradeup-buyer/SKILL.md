@@ -122,6 +122,12 @@ If no opportunities found, tell the user and stop.
 
 #### 2a. Pagination loop (mandatory with explicit state tracking)
 
+⚠️ **CRITICAL: This skill has NO page limit.** You will page indefinitely (100+, 500+ pages if needed) until one of two conditions:
+1. **Collected goal:** You have enough items → STOP
+2. **Price ceiling hit:** ALL items on a page exceed maxPrice → STOP
+
+There is NO OTHER stopping condition. Not "page 15 safety limit", not "consecutive empties", not "arbitrary depth". Only goal or price ceiling.
+
 **BEFORE starting pagination for ANY item, initialize this state table:**
 
 ```
@@ -141,10 +147,10 @@ PAGINATION STATE:
 PAGINATION_LOOP:
   page = 1
   collected_listings = []
-  consecutive_zero_pages = 0
+  price_ceiling_hit = false
 
   LOOP:
-    ✓ BEFORE EACH CALL: Log current state (page #, consecutive empties, total collected so far)
+    ✓ BEFORE EACH CALL: Log current state (page #, total collected so far)
 
     Call FetchFloatData:
       itemName: input.itemName (without wear condition)
@@ -158,13 +164,12 @@ PAGINATION_LOOP:
     page_listings = response.listings
     page_count = length(page_listings)
 
-    ✓ AFTER EACH CALL: Update state table with [page number], [listings found], [consecutive empty count]
+    ✓ AFTER EACH CALL: Update state table with [page number], [listings found]
 
     DECISION TREE:
 
     IF (page_count > 0):
-      ✓ Log: "✅ Page [page]: [page_count] listings found"
-      consecutive_zero_pages = 0
+      ✓ Log: "✅ Page [page]: [page_count] listings found (within float/price constraints)"
       collected_listings += page_listings
 
       IF (collected_listings.length >= input.Count):
@@ -175,31 +180,16 @@ PAGINATION_LOOP:
         page += 1
 
     ELSE IF (page_count == 0):
-      consecutive_zero_pages += 1
-      ✓ Log: "⚠️ Page [page]: 0 listings. Consecutive empty: [consecutive_zero_pages]"
+      ✓ Log: "📄 Page [page]: 0 listings found on this page"
+      ✓ CHECK: Did FetchFloatData indicate ALL listings on this page exceed price ceiling?
 
-      IF (consecutive_zero_pages == 1):
-        ✓ Log: "ℹ️ First empty page is normal (float/price distribution varies). Continuing to page [page+1]..."
+      IF (response indicates all items exceed price ceiling):
+        ✓ Log: "💰 PRICE CEILING HIT: All listings on page [page] exceed R[maxPrice]. Market cannot go lower."
+        price_ceiling_hit = true
+        BREAK  ← Exit pagination loop
+      ELSE:
+        ✓ Log: "ℹ️ No listings pass float constraints on this page, but price is OK. Float distribution varies. Continuing..."
         page += 1
-
-      ELSE IF (consecutive_zero_pages >= 2):
-        ✓ CRITICAL DECISION: You have 2+ consecutive empty pages.
-        ✓ Log: "⚠️ PATTERN: [consecutive_zero_pages] consecutive empty pages detected."
-        ✓ CHECK: Have you reached page 15 yet?
-
-        IF (page < 15):
-          ✓ Log: "📌 NOT at page limit yet (page [page]/15). Market may recover. Continue paging..."
-          page += 1
-
-        ELSE IF (page >= 15):
-          ✓ Log: "🛑 STOP: Hit page 15 safety limit with [consecutive_zero_pages] consecutive empty pages."
-          BREAK  ← Exit pagination loop
-        END IF
-    END IF
-
-    IF (page > 15):
-      ✓ Log: "🛑 SAFETY LIMIT: Reached page 15. Exiting pagination."
-      BREAK  ← Exit loop unconditionally
 
   END LOOP
 
@@ -209,57 +199,56 @@ PAGINATION_LOOP:
     Item: [itemName]
     Collected: [collected_listings.length]/[input.Count]
     Pages accessed: 1-[page-1]
-    Consecutive empty pages at end: [consecutive_zero_pages]
-    Status: [ENOUGH / SHORTFALL / MARKET EXHAUSTED]
+    Stop reason: [GOAL REACHED / PRICE CEILING HIT / STILL SEARCHING]
+    Status: [ENOUGH / SHORTFALL]
     ```
 
   Return: collected_listings
 ```
 
 **Critical Enforcement Rules:**
-- ✅ You MUST log state after every FetchFloatData call (not just summaries)
-- ✅ You MUST continue to at least page 3 even if pages 1-2 are empty (first 2 empties don't stop you)
-- ✅ You MUST reach page 15 before abandoning a search (no exceptions for "low prices" or "high floats" on page 1)
+- ✅ You MUST log state after every FetchFloatData call
+- ✅ You MUST continue paging even if pages 1-5 return 0 results (float constraints take time)
+- ✅ You MUST only stop when: (a) collected enough items, OR (b) price ceiling is hit across entire page
 - ✅ You MUST update the state table in your response for the user to see pagination progress
-- ✅ If you stop before page 15, explicitly state WHY (goal reached, 2+ consecutive empties, or safety limit)
+- ✅ No page limit — keep paging until one of the two stop conditions is met
 
 #### 2b. Pagination enforcement (MANDATORY COMPLIANCE)
 
 **⚠️ CRITICAL: These are not guidelines — they are strict rules. Violating them means the skill is broken.**
 
-**Rule 1: NO early abandonment based on page 1**
-- Page 1 returns 0 results → MUST continue to page 2, 3, 4, ...
-- Page 1 has prices above ceiling → MUST continue (later pages have different price ranges)
-- Page 1 has floats above ceiling → MUST continue (float distribution varies by page)
-- **Exception:** ONLY stop if page 1 returns sufficient listings to meet input.Count
+**Rule 1: NO early abandonment based on float constraints**
+- Pages 1-5 return 0 listings due to float being out of range → MUST continue (float distribution varies significantly)
+- Float constraints are tight → This is EXPECTED. Keep paging; floats take time to find.
+- **Exception:** ONLY stop if (a) you've collected enough, OR (b) price ceiling is hit on the current page
 
-**Rule 2: Empty pages are normal — don't panic**
-- 1st consecutive empty page → Continue to next page (normal, not a signal)
-- 2nd consecutive empty page → Still continue to next page (may be temporary gap in market)
-- **Only after 2+ consecutive empties AND page count check:** consider market exhaustion
+**Rule 2: Price ceiling is the only hard blocker**
+- All listings on a page exceed maxPrice ceiling → STOP (prices only increase on later pages)
+- A few listings exceed price but some pass → Continue (filter constraints apply at fetch time)
+- If page returns 0 listings and prices don't hit ceiling → Continue paging
 
-**Rule 3: Page limit is firm**
-- MUST page up to page 15 before considering market exhausted
-- If you reach page 15, STOP pagination (safety limit)
-- Do NOT skip to page 15 — page sequentially (1, 2, 3, ... 15)
+**Rule 3: No page limit**
+- NO hard page limit (remove page 15 concept)
+- Keep paging until one of the two stopping conditions: collected goal OR price ceiling hit
+- This may take 25-50+ pages for tight float constraints — this is normal and expected
 
 **Rule 4: State reporting is mandatory**
 - AFTER every FetchFloatData call, update the pagination state table in your response
-- Show: page number, listings found, consecutive empty count
+- Show: page number, listings found, progress toward goal
 - Show: decision ("continue to page X" or "stop because Y")
 - Do NOT suppress this output — users need to see pagination progress
 
 **Rule 5: Stopping conditions (in order of priority)**
 1. **Collected goal?** Collected ≥ input.Count items → Stop pagination
-2. **Hit page 15?** Reached page 15 (regardless of empties) → Stop pagination
-3. **Market exhausted?** 2+ consecutive empty pages (and at least page 3 attempted) → Stop pagination
-4. **NO other conditions exist** → If none of above, continue paging
+2. **Price ceiling hit?** FetchFloatData indicates all items exceed maxPrice → Stop pagination (no recovery possible)
+3. **NO other conditions exist** → If neither above, continue paging (forever if needed)
 
 **Red flags that indicate the skill was violated:**
-- ❌ "I stopped at page 2 because prices were high" → VIOLATION (should continue to page 15)
-- ❌ "I abandoned after page 3 because floats didn't meet constraint" → VIOLATION (should continue)
-- ❌ "No results on page 1, assuming market is empty" → VIOLATION (should check pages 2-15)
+- ❌ "I stopped at page 3 because floats were high" → VIOLATION (should continue)
+- ❌ "I gave up because price exceeded ceiling on page 1" → VIOLATION (page 1 doesn't determine later pages for price)
+- ❌ "I abandoned after page 5 with 0 results" → VIOLATION (should check pages 6-25+)
 - ❌ "No pagination state table shown" → VIOLATION (state tracking is mandatory)
+- ❌ "I stopped at page 15 for safety" → VIOLATION (no page limit exists)
 
 #### 2c. Listing fields
 
@@ -396,14 +385,14 @@ Report: items purchased, total spent, duration, any errors.
 - **Price constraint** — pass the exact `maxPrice` from the opportunity (input.maxPrice) to FetchFloatData. This is a hard ceiling pre-calculated by the opportunity to preserve profitability. Do not recalculate or adjust it.
 - **Wiggle room calculation** — pass `expectedOutputValue: opportunity.bestOutput.Price` (the current market price of the output skin) to FetchFloatData for all scouting calls. The server uses this to calculate wiggle room: `wiggle = output_price - total_cost`. This margin buffer ensures the trade-up remains profitable even with small market fluctuations.
 - **Pagination is mandatory and requires strict compliance** — You MUST follow the pagination loop exactly as defined in section 2a, including state tracking. This is not optional:
-  - **Initialization:** Create and update a pagination state table showing page number, listings found, and consecutive empty count
+  - **Initialization:** Create and update a pagination state table showing page number, listings found, progress toward goal
   - **Every page:** Log your decision before and after the API call
   - **Page 1 = 0 results:** Continue to pages 2, 3, 4... (do NOT assume market is empty)
-  - **Float constraints tight on page 1:** Continue paging (pages vary in float distribution)
-  - **Prices high on page 1:** Continue paging (later pages show different price ranges)
-  - **Empty pages:** First empty is normal; 2 consecutive empties + page ≥ 3 suggests market exhausted
-  - **Page 15 limit:** MUST reach page 15 before giving up (unless goal is already met)
-  - **Stop conditions (only):** (a) Collected enough, OR (b) Reached page 15, OR (c) 2+ consecutive empties after page 2
+  - **Float constraints tight on page 1:** Continue paging — floats are random and widely distributed (normal to go 25-50+ pages)
+  - **Prices high on page 1:** Continue paging if any items pass constraints (prices vary by page)
+  - **Empty pages:** Keep paging unless price ceiling is hit (float distribution is natural variance)
+  - **No page limit:** Remove the concept of page 15. Keep paging indefinitely.
+  - **Stop conditions (only):** (a) Collected enough items, OR (b) Price ceiling hit (all items on page exceed maxPrice)
   - **Reporting:** Show pagination state table to user after each page (not just summaries)
 - **Currency behavior** — all costs are in ZAR; the server stores and returns prices in ZAR.
 - **Rate limit handling** — the server's FloatScraperService handles Steam rate limits internally (throttle delays, retry logic). If rate limited, FetchFloatData returns what it could fetch in the current request.
