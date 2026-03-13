@@ -105,38 +105,87 @@ If no opportunities found, tell the user and stop.
 
 ### Step 2 — Scout Steam market for each input
 
-For each input in the opportunity, call FetchFloatData with:
-- `itemName` = input item name (without wear condition)
-- `wearCondition` = input wear condition
-- `pageSize` = 100 (or adapt based on availability)
-- Inline constraints (passed to FetchFloatData):
-  - `maxFloat` = input.maxFloat (the hard ceiling from the opportunity; do not modify)
-  - `maxPrice` = input.maxPrice (the per-item price ceiling from the opportunity; do not modify or calculate)
+⚠️ **CRITICAL:** Pagination is mandatory. Do NOT stop after page 1 if it returns 0 results. Different pages contain different float ranges and prices. Continue paging until listings are found or market is exhausted.
 
-FetchFloatData returns only listings that pass both constraints (float ≤ maxFloat AND price ≤ maxPrice).
+#### 2a. Pagination loop (mandatory)
 
-**Pagination strategy:** Automatically paginate through all results (incrementing `page` parameter). Continue pagination indefinitely across multiple pages:
+For each input in the opportunity:
 
-**Stop pagination ONLY when:**
-1. You've collected enough listings to meet the required quantity, OR
-2. A page returns zero listings AND the previous page already showed increasing prices (market exhausted)
+```
+PAGINATION_LOOP:
+  page = 1
+  collected_listings = []
+  consecutive_zero_pages = 0
 
-**Never stop pagination when:**
-- A page returns 0 listings but prices haven't been checked yet—continue to next page
-- Float constraints aren't met on current page—continue to next page (float ranges vary across pages)
-- Prices seem high—continue paging (different float ranges mean different prices available further down)
+  WHILE (need more listings):
+    Call FetchFloatData:
+      itemName: input.itemName (without wear condition)
+      wearCondition: input.wearCondition
+      maxFloat: input.maxFloat (hard ceiling—do not modify)
+      maxPrice: input.maxPrice (hard ceiling—do not modify)
+      pageSize: 100
+      page: page
 
-**Parallel page fetching (optional optimization):** Pages are independent and safe to fetch in parallel using subagents. The web proxy handles Steam rate limits internally, so fetching multiple pages concurrently (e.g., pages 1-5 or 1-10 at once) will not trigger rate limits and significantly speeds up scouting. Use this approach when sourcing multiple inputs—pages can be gathered in parallel and merged by float/price.
+    page_listings = response.listings
 
-Each listing has: `listingId`, `itemName`, `float`, `price`, `subtotalCents`, `feeCents`.
+    IF (page_listings.empty):
+      consecutive_zero_pages += 1
+      IF (consecutive_zero_pages == 1):
+        → Continue to page+1 (first empty page is normal)
+      ELSE IF (consecutive_zero_pages >= 2):
+        → Market exhausted. Exit loop.
+      ELSE:
+        → Continue to page+1
+    ELSE:
+      consecutive_zero_pages = 0
+      collected_listings += page_listings
+      IF (collected_listings.length >= input.Count):
+        → Have enough. Exit loop.
 
-**Shortfall handling** (if collected listings < input.Count after pagination exhausted):
-- Check `input.AlternativeSkins` — these are same-collection/same-rarity substitutes with the same adjusted float
-- Each alternative has `itemName`, `wearCondition`, `maxItemFloat` (max float to match adjusted float), and `lowestPrice`
-- Call FetchFloatData for each alternative and apply the same pagination strategy
-- Alternative listings must have float ≤ alternative.maxItemFloat
+    page += 1
+    IF (page > 15):
+      → Safety limit: market exhausted.
 
-If any input group yields **0 listings found** across all pages and alternatives are insufficient/unavailable, warn the user — the trade-up cannot be executed without all inputs.
+  END WHILE
+
+  Return: collected_listings
+```
+
+#### 2b. Pagination rules (DO NOT SKIP)
+
+1. **Page 1 returns 0 results?** → Continue to page 2, 3, 4...
+   - Different pages have different float ranges
+   - Strict constraints may skip early pages
+
+2. **Prices are high on page 1?** → Continue paging.
+   - Lower-priced items may be on later pages
+
+3. **Float constraints not met?** → Continue paging.
+   - Float availability varies across pages
+
+4. **STOP pagination ONLY when:**
+   - ✅ Collected enough listings (≥ input.Count), OR
+   - ✅ 2+ consecutive empty pages (market exhausted), OR
+   - ✅ Reached page 15+ (safety limit)
+
+5. **NEVER assume "no listings"** based on page 1 alone.
+
+#### 2c. Listing fields
+
+Each listing has: `listingId`, `itemName`, `float`, `price`, `subtotalCents`, `feeCents`
+
+#### 2d. Shortfall handling (if collected < needed)
+
+After pagination exhausted:
+- Check `input.AlternativeSkins` (same collection/rarity)
+- For each alternative, repeat pagination (Step 2a-b) with:
+  - `maxFloat` = alternative.maxItemFloat
+  - `maxPrice` = alternative.maxPrice
+- Continue until input group satisfied
+
+#### 2e. No listings found
+
+If input group has 0 listings across all pages and alternatives, trade-up cannot execute. Warn user and suggest trying different trade-up with higher budget or looser constraints.
 
 ---
 
