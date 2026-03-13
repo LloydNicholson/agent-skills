@@ -17,23 +17,6 @@ Automated workflow for discovering profitable CS2 trade-up opportunities, scouti
 
 ---
 
-### 2. **GitHub PR Review** (`github-pr-review`)
-Automated pull request review workflow with inline comments, approval/request-changes decisions, and summaries.
-
-**Status:** Template (customize as needed)
-**Files:**
-- `SKILL.md` — Workflow specification
-
----
-
-### 3. **Docker Debug** (`docker-debug`)
-Diagnostic and troubleshooting skill for Docker containers and services.
-
-**Status:** Template (customize as needed)
-**Files:**
-- `SKILL.md` — Workflow specification
-
----
 
 ## 🚀 Usage
 
