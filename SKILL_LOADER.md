@@ -23,7 +23,7 @@ With a loader, agents just ask: *"What skills do I have?"* and the system return
 │ Skill Loader searches in order:                              │
 │  1. .skills/ (project local)                                 │
 │  2. ~/.agent-skills/ (user home)                             │
-│  3. ~/ai/skills/skills/ (global)                             │
+│  3. ~/ai/skills/ (global)                                    │
 │  4. MCP registry (if configured)                             │
 │  5. GitHub search (if enabled)                               │
 └─────────────────────────────────────────────────────────────┘
@@ -60,14 +60,14 @@ tags: ["cs2", "trading", "automation"]
 
 ### 2. Skill Index (skills.json)
 
-Store in `~/ai/skills/` or `.skills/`:
+Store in `~/ai/skills/` (or `.skills/` in projects):
 
 ```json
 {
   "skills": [
     {
       "name": "cs2-tradeup-buyer",
-      "path": "skills/cs2-tradeup-buyer",
+      "path": "cs2-tradeup-buyer",
       "version": "1.0.0",
       "source": "local",
       "triggers": [
@@ -77,7 +77,7 @@ Store in `~/ai/skills/` or `.skills/`:
     },
     {
       "name": "github-pr-review",
-      "path": "skills/github-pr-review",
+      "path": "github-pr-review",
       "version": "0.1.0",
       "source": "local",
       "triggers": [
@@ -103,7 +103,7 @@ class SkillLoader:
         self.search_paths = [
             Path.cwd() / ".skills",           # Project local
             Path.home() / ".agent-skills",    # User home
-            Path("/Users/lloyd/ai/skills/skills"),  # Global
+            Path("/Users/lloyd/ai/skills"),  # Global
         ]
 
     def load_all_skills(self) -> List[Dict]:
@@ -211,7 +211,7 @@ Skills are discovered in this order (first match wins):
 
 1. **`.skills/`** (project-local) — highest priority
 2. **`~/.agent-skills/`** (user home)
-3. **`~/ai/skills/skills/`** (global)
+3. **`~/ai/skills/`** (global)
 4. **MCP registry** (if configured)
 5. **GitHub** (if enabled with token)
 

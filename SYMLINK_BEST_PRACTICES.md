@@ -8,7 +8,7 @@ Instead of agents hunting for skills in multiple locations, every project has a 
 
 ```
 my-project/
-├── .skills -> ~/ai/skills/skills    ← symlink
+├── .skills -> ~/ai/skills    ← symlink
 ├── src/
 ├── tests/
 └── README.md
@@ -25,7 +25,7 @@ my-project/
 
 ```bash
 cd my-project
-ln -s ~/ai/skills/skills .skills
+ln -s ~/ai/skills .skills
 git add .gitignore  # (see below)
 ```
 
@@ -48,7 +48,7 @@ find ~/projects -name ".skills" -type l
 
 # Ensure .skills symlinks exist in all project dirs
 sync-project-skills() {
-  local skills_path="$HOME/ai/skills/skills"
+  local skills_path="$HOME/ai/skills"
   find $HOME/projects -maxdepth 1 -type d ! -name "." | while read dir; do
     if [ ! -L "$dir/.skills" ]; then
       ln -s "$skills_path" "$dir/.skills"
@@ -76,7 +76,7 @@ skills/
 This way:
 - Symlink is versioned
 - Team members get the same symlink
-- Git tracks `.skills -> ~/ai/skills/skills`
+- Git tracks `.skills -> ~/ai/skills`
 
 ```bash
 cd my-project
@@ -98,7 +98,7 @@ If you prefer not to version the symlink:
 
 Then each developer runs:
 ```bash
-ln -s ~/ai/skills/skills .skills
+ln -s ~/ai/skills .skills
 ```
 
 **I recommend Option 1** — commit the symlink so the expectation is automatic.
@@ -112,7 +112,7 @@ If two branches both create `.skills` symlinks:
 # Resolve by ensuring both point to the same target:
 
 git rm .skills              # Remove the "file"
-ln -s ~/ai/skills/skills .skills  # Recreate symlink
+ln -s ~/ai/skills .skills  # Recreate symlink
 git add .skills
 git commit -m "Resolve .skills symlink"
 ```
@@ -232,7 +232,7 @@ If you want multiple skill repos (public, private, experimental):
 
 ```bash
 # global symlink points to public
-ln -s ~/ai/skills/skills .skills
+ln -s ~/ai/skills .skills
 
 # but Skill Loader also searches private
 self.search_paths = [
@@ -304,7 +304,7 @@ A: Only if you're NOT committing the symlink. I recommend committing it, so don'
 A: Use `mklink /D .skills C:\path\to\skills` instead of `ln -s`. Git handles both.
 
 **Q: What if someone deletes the symlink by accident?**
-A: It's just a symlink, easy to recreate: `ln -s ~/ai/skills/skills .skills`
+A: It's just a symlink, easy to recreate: `ln -s ~/ai/skills .skills`
 
 **Q: Can we point to a GitHub repo instead?**
 A: Yes! Clone the repo instead: `git clone https://github.com/LloydNicholson/agent-skills ~/ai/skills` then create symlinks.

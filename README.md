@@ -4,7 +4,7 @@ A curated collection of production-ready Claude Code skills for automated workfl
 
 ## 📁 Skills Included
 
-### 1. **CS2 Trade-Up Buyer** (`skills/cs2-tradeup-buyer`)
+### 1. **CS2 Trade-Up Buyer** (`cs2-tradeup-buyer`)
 Automated workflow for discovering profitable CS2 trade-up opportunities, scouting Steam Market listings, and executing purchases with budget/float constraints.
 
 **Status:** Production-ready
@@ -17,7 +17,7 @@ Automated workflow for discovering profitable CS2 trade-up opportunities, scouti
 
 ---
 
-### 2. **GitHub PR Review** (`skills/github-pr-review`)
+### 2. **GitHub PR Review** (`github-pr-review`)
 Automated pull request review workflow with inline comments, approval/request-changes decisions, and summaries.
 
 **Status:** Template (customize as needed)
@@ -26,7 +26,7 @@ Automated pull request review workflow with inline comments, approval/request-ch
 
 ---
 
-### 3. **Docker Debug** (`skills/docker-debug`)
+### 3. **Docker Debug** (`docker-debug`)
 Diagnostic and troubleshooting skill for Docker containers and services.
 
 **Status:** Template (customize as needed)
@@ -41,7 +41,7 @@ Each skill is self-contained and portable. To use a skill:
 
 1. **Copy the skill folder** to your local Claude Code skills directory:
    ```bash
-   cp -r skills/cs2-tradeup-buyer ~/.claude/skills/
+   cp -r cs2-tradeup-buyer ~/.claude/skills/
    ```
 
 2. **Invoke the skill** with the command specified in its `SKILL.md` or `.instructions.md`
@@ -62,7 +62,7 @@ Each skill is self-contained and portable. To use a skill:
 
 To add a new skill to this repository:
 
-1. Create a new folder under `skills/`
+1. Create a new folder at the root level
 2. Add `SKILL.md` with frontmatter and technical specification
 3. Add optional `.instructions.md` for user guidance
 4. Add optional `examples.md` for common scenarios
