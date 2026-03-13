@@ -136,6 +136,7 @@ PAGINATION_LOOP:
       wearCondition: input.wearCondition
       maxFloat: input.maxFloat (hard ceiling—do not modify)
       maxPrice: input.maxPrice (hard ceiling—do not modify)
+      expectedOutputValue: opportunity.bestOutput.Price (current market price of the trade-up output skin)
       pageSize: 100
       page: page
 
@@ -199,7 +200,7 @@ FOR EACH alternative IN alternatives:
   IF (collected >= input.Count):
     → Input group satisfied. BREAK.
 
-  collected_from_alt = pagination(alternative.itemName, alt.maxFloat, alt.maxPrice)
+  collected_from_alt = pagination(alternative.itemName, alt.maxFloat, alt.maxPrice, expectedOutputValue: opportunity.bestOutput.Price)
   collected += collected_from_alt
 
   IF (collected >= input.Count):
@@ -316,6 +317,7 @@ Report: items purchased, total spent, duration, any errors.
 - **Filtering happens at FetchFloatData** — call FetchFloatData with `maxFloat` and `maxPrice` parameters to get pre-filtered listings from Steam. The service applies constraints at fetch time (inline filtering).
 - **Float constraint** — pass the exact `maxFloat` from the opportunity (input.maxFloat) to FetchFloatData. This is a hard ceiling, not a relaxed tolerance. The opportunity specifies the maximum float to preserve the trade-up's profitability and hit probability.
 - **Price constraint** — pass the exact `maxPrice` from the opportunity (input.maxPrice) to FetchFloatData. This is a hard ceiling pre-calculated by the opportunity to preserve profitability. Do not recalculate or adjust it.
+- **Wiggle room calculation** — pass `expectedOutputValue: opportunity.bestOutput.Price` (the current market price of the output skin) to FetchFloatData for all scouting calls. The server uses this to calculate wiggle room: `wiggle = output_price - total_cost`. This margin buffer ensures the trade-up remains profitable even with small market fluctuations.
 - **Pagination is mandatory and requires persistence** — You MUST page through multiple pages. The first page returning 0 results does NOT mean there are no listings. Continue paging aggressively:
   - Page 1 returns 0 results? → Page 2, Page 3, Page 4, ... continue
   - Float constraints not met on page 1? → Continue paging (float ranges vary across pages)
