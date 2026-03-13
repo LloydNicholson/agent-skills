@@ -1,0 +1,35 @@
+# Agent state (separate from repo)
+.agent-state/
+~/.agent-state/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Node (if applicable)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if applicable)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
