@@ -59,6 +59,63 @@ Common tool names may include:
 
 Never fail just because names differ; use tool descriptions + schemas to pick the equivalent.
 
+## Error Recovery & Session Handling
+
+**⚠️ CRITICAL: This section prevents infinite retry loops and ensures reliable recovery.**
+
+The cs2-market-bot MCP server uses session-based connections that may time out (typically 3-5 minutes idle). When a session expires, you will receive this error:
+
+```
+MCP server 'cs2-market-bot': Error: Streamable HTTP error: 
+{"error":{"code":-32001,"message":"Session not found"},"id":"","jsonrpc":"2.0"}
+```
+
+### If a tool call returns error code -32001 (Session not found):
+
+**❌ DO NOT retry immediately with backoff. Retrying with the same dead session will always fail.**
+
+**✅ Instead, follow this exact sequence:**
+
+1. **Reload the skill immediately**
+   - Call the `skill` tool with `cs2-tradeup-buyer` 
+   - Wait for the reload to complete (you'll see confirmation message)
+   - This reestablishes the MCP connection and creates a new session ID
+
+2. **Reinitialize the MCP connection**
+   - The skill reload automatically reinitializes the connection
+   - No additional step needed; the connection is fresh
+
+3. **Restore checkpoint state** (if applicable)
+   - If the error occurred during pagination: retrieve the last saved checkpoint
+   - Checkpoint contains: page number, items collected, item name, float/price constraints
+   - Resume from that checkpoint page (e.g., if error on page 5, fetch page 5 again)
+
+4. **Retry the previous operation**
+   - Re-execute the exact tool call that failed (e.g., fetch_float_data, execute_trade_up_input_purchases)
+   - Use the fresh session created by the reloaded skill
+   - Include checkpoint state in the retry (resume page, collected items)
+
+5. **If retry still fails with -32001**
+   - Apply exponential backoff retry: wait 1s, retry
+   - Second failure: wait 2s, retry
+   - Third failure: wait 4s, retry
+   - After 3 backoff retries (4 total attempts including initial): report failure to user with all collected data
+
+6. **Resume from checkpoint**
+   - If pagination: show user "📍 Resuming from page X, have Y/Z items collected"
+   - If purchase: show user "📋 Retrying purchase of [N] collected items"
+   - Do not start over from page 1 or discard collected items
+
+**Example log output (user will see this):**
+```
+❌ Session timeout on page 5 of MP9 | Black Sand
+🔄 Step 1: Reloading skill...
+✅ Skill reloaded. New session established.
+📍 Checkpoint found: page 5, 3/10 items collected
+🔄 Step 2: Resuming from page 5...
+✅ Success. Continuing pagination.
+```
+
 ---
 
 ## Workflow
@@ -93,6 +150,13 @@ Call the discovered opportunity tool with:
 - `currency` = user requested currency (or omit if tool/server does not support currency parameter)
 - `pageSize` = 5 (default; increase if user asks for "top N" or "all options")
 - `uniqueByOutput` = true (default; set false only if user wants all variations including same outputs)
+
+**`lastHours` filter — schedule-aware default:**
+Trade-up opportunities are recalculated **once daily at ~06:00 SAST (UTC+2)**. When choosing `lastHours`:
+- Do **not** use `lastHours` by default — omitting it returns all available opportunities regardless of age.
+- If the user invokes this skill **within ~20 hours of 06:00 SAST** (i.e. same calendar day), the freshest opps are from that morning's run. Omitting `lastHours` is fine.
+- Only use `lastHours` if the user explicitly asks for "fresh" or "recent" opportunities, or if you suspect the opportunity DB may contain stale data from a previous day. In that case use `lastHours=20` to cover the full window since the last 06:00 SAST run.
+- **Never use `lastHours=1` or `lastHours=6`** — these will almost always return no results since the batch runs once a day, not continuously.
 
 Selection logic:
 - Sort descending by profitability (or rely on server sort if guaranteed).
@@ -148,9 +212,22 @@ PAGINATION_LOOP:
   page = 1
   collected_listings = []
   price_ceiling_hit = false
+  checkpoint = null
 
   LOOP:
     ✓ BEFORE EACH CALL: Log current state (page #, total collected so far)
+
+    💾 CHECKPOINT SAVE: Before calling FetchFloatData, save checkpoint state
+    checkpoint = {
+      "operation": "fetch_float_data",
+      "item_name": input.itemName,
+      "wear_condition": input.wearCondition,
+      "page": page,
+      "items_collected": collected_listings.length,
+      "max_float": input.maxFloat,
+      "max_price": input.maxPrice,
+      "timestamp": current_time
+    }
 
     Call FetchFloatData:
       itemName: input.itemName (without wear condition)
@@ -161,10 +238,18 @@ PAGINATION_LOOP:
       pageSize: 100
       page: page
 
+    ❌ IF ERROR -32001 (SESSION NOT FOUND):
+      ✓ Log: "❌ Session timeout on page [page] of [itemName]"
+      ✓ Save checkpoint to display to user
+      ✓ Follow "Error Recovery & Session Handling" section (reload → reinitialize → retry from checkpoint)
+      ✓ If recovery succeeds: resume pagination from checkpoint.page with checkpoint.items_collected
+      ✓ If recovery fails after 3 retries: report shortfall + checkpoint to user
+
     page_listings = response.listings
     page_count = length(page_listings)
 
     ✓ AFTER EACH CALL: Update state table with [page number], [listings found]
+    ✓ CHECKPOINT UPDATE: If page succeeded, update checkpoint with new page number and items collected
 
     DECISION TREE:
 
@@ -201,6 +286,7 @@ PAGINATION_LOOP:
     Pages accessed: 1-[page-1]
     Stop reason: [GOAL REACHED / PRICE CEILING HIT / STILL SEARCHING]
     Status: [ENOUGH / SHORTFALL]
+    Last checkpoint: page [checkpoint.page], [checkpoint.items_collected] items collected
     ```
 
   Return: collected_listings
@@ -374,7 +460,37 @@ Only after the user confirms, call the discovered purchase execution tool with t
 
 If the float/listing tool returns extra pricing fields (for example `subtotalCents`, `feeCents`, fees, taxes, or converted totals), pass them through exactly when required by the purchase tool schema.
 
-Report: items purchased, total spent, duration, any errors.
+**Session resilience for purchases:**
+
+The purchase operation is a single call (not paginated), but still susceptible to session timeout. Follow this strategy:
+
+```
+ATTEMPT 1: Call execute_trade_up_input_purchases with collected listings
+
+❌ IF ERROR -32001 (SESSION NOT FOUND):
+  ✓ Log: "❌ Session timeout during purchase execution"
+  ✓ Follow "Error Recovery & Session Handling" section
+  ✓ Reload skill, reinitialize connection
+  
+  ATTEMPT 2: Retry with same listings (after 1s wait)
+    ❌ IF ERROR -32001 AGAIN:
+      ✓ Wait 2s, retry (ATTEMPT 3)
+    
+    ❌ IF ERROR -32001 AGAIN:
+      ✓ Wait 4s, retry (ATTEMPT 4)
+    
+    ❌ IF ERROR -32001 AGAIN (3rd failure):
+      ✓ Report failure to user with:
+        - Which items were found and ready to buy
+        - Total cost that would have been spent
+        - Action: "Please retry in a few moments once service recovers"
+
+✅ IF SUCCESS:
+  ✓ Log all purchased items with prices, floats
+  ✓ Report total spent and profit potential
+```
+
+Report: items purchased, total spent, duration, any errors. If purchase partially succeeds (some items buy, some fail), report both success and failure items clearly.
 
 ---
 

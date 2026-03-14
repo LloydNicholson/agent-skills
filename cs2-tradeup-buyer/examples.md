@@ -154,6 +154,51 @@ Take-up under R200, but show prices in USD
 | Slow scouting (10+ min) | Many alternatives, large item count | Normal for difficult trade-ups |
 | "0 items found" | Market inventory depleted or float spec too tight | Relax tolerances (automatic) or abort |
 | Purchase fails with confirmation | Market inventory changed during delay | Rerun scout to get fresh listings |
+| "-32001 Session not found" error | MCP server session timed out (3–5 min idle) | See below → Auto-recovery |
+
+### Session Timeout Recovery (-32001 Error)
+
+**What it is:** The MCP server closes sessions after ~3–5 minutes of inactivity. This can happen during pagination (scouting) or purchase.
+
+**What the skill does automatically:**
+1. Detects the error
+2. Reloads the skill (creates a new MCP session)
+3. Restores the last checkpoint (page number, items collected)
+4. Retries from that checkpoint
+5. Logs the recovery for transparency
+
+**Example: Pagination gets interrupted**
+```
+📊 Page 3 of MP9 | Black Sand — 2/10 items collected
+❌ Session timeout on page 3
+🔄 Reloading skill...
+✅ Skill reloaded. New session established.
+📍 Checkpoint found: page 3, 2 items collected
+🔄 Resuming from page 3...
+✅ Page 3: 3 more items found
+📊 Progress: 5/10 collected. Continuing...
+```
+
+**Example: Purchase gets interrupted**
+```
+💳 Executing purchase of 10 items for R25.86...
+❌ Session timeout during purchase
+🔄 Reloading skill...
+✅ Skill reloaded. New session established.
+🔄 Retrying purchase (attempt 2)...
+✅ All 10 items purchased successfully
+```
+
+**If recovery fails after 3 attempts:**
+```
+❌ Purchase failed after 3 retry attempts
+📋 Items ready to buy (collected during scouting):
+   - 3× MP9 | Black Sand (R2.51 each)
+   - 7× AUG | Commando Company (R2.13 each)
+💡 Try again in a few moments — service may recover
+```
+
+**What you need to do:** Nothing! The recovery is automatic. If you see checkpoint restore messages, the skill is handling the timeout. Just wait for it to complete.
 
 ---
 
