@@ -135,11 +135,24 @@ If no opportunities found, tell the user and stop.
 
 ---
 
-### Step 2 — Scout Steam market for each input
+### Step 2 — Scout Steam market for each input (PARALLEL PAGINATION)
 
 ⚠️ **CRITICAL:** Pagination is mandatory. Do NOT stop after page 1 if it returns 0 results. Different pages contain different float ranges and prices. Continue paging until listings are found or market is exhausted.
 
-#### 2a. Pagination loop (mandatory with explicit state tracking)
+#### 2a. Parallel input scouting (key optimization)
+
+**For Multi-type trade-ups with multiple input groups:** Instead of scouting inputs sequentially (Item A pages 1→N, then Item B pages 1→N), **spawn one subagent per input group**. Each subagent handles pagination for its assigned item in parallel.
+
+**Example:** Trade-up with 2 inputs:
+- ✅ Spawn Task 1: Scout Item A (pages loop until goal or price ceiling hit)
+- ✅ Spawn Task 2: Scout Item B (pages loop until goal or price ceiling hit)
+- 🔄 Both tasks run simultaneously
+- ⏳ Main skill waits for all tasks to complete
+- 🔗 Merge results from all tasks
+
+For **Single-type trade-ups** (10× same item), apply pagination loop once (no parallelization needed).
+
+#### 2b. Pagination loop (mandatory with explicit state tracking)
 
 ⚠️ **CRITICAL: This skill has NO page limit.** You will page indefinitely (100+, 500+ pages if needed) until one of two conditions:
 1. **Collected goal:** You have enough items → STOP
@@ -160,7 +173,58 @@ PAGINATION STATE:
 |      |                |                   |                  |        |
 ```
 
-**For each input in the opportunity, execute the deterministic pagination loop:**
+**For Multi-type trade-ups, spawn subagents (one per input group):**
+
+```
+# Spawn all inputs in parallel (all at once, not sequentially)
+
+FOR EACH input_group in opportunity.inputs:
+  SPAWN SUBAGENT TASK:
+    Agent type: task (deterministic work, can verify idempotency)
+    Prompt: "Scout the Steam market for [input.itemName] (wear: [input.wearCondition])
+             following this pagination workflow:
+             
+             - Item: [input.itemName]
+             - Wear: [input.wearCondition]
+             - Need: [input.Count] items
+             - Constraints: float ≤ [input.maxFloat], price ≤ [input.maxPrice]
+             - Output market price: R[opportunity.bestOutput.Price]
+             - Max cost per item: R[input.maxPrice]
+             
+             Pagination rules:
+             1. Start page 1, fetch pages sequentially
+             2. STOP when: (a) collected [input.Count] items, OR (b) all items on a page exceed price ceiling
+             3. NO arbitrary page limits — keep paging until one stop condition is met
+             4. Use cs2-market-bot-fetch_float_data with all parameters specified below
+             
+             Call fetch_float_data with:
+             - itemName: [input.itemName]
+             - wearCondition: [input.wearCondition]
+             - maxFloat: [input.maxFloat]
+             - maxPrice: [input.maxPrice]
+             - expectedOutputValue: [opportunity.bestOutput.Price]
+             - pageSize: 100
+             - page: <starting from 1, increment each call>
+             
+             Return a JSON with:
+             {
+               'item_name': '[input.itemName]',
+               'status': 'success' | 'shortfall',
+               'collected_count': <number>,
+               'listings': [<listing objects>],
+               'total_pages': <pages accessed>,
+               'stop_reason': 'goal_reached' | 'price_ceiling_hit',
+               'final_cost': <sum of prices>
+             }
+    Mode: background (so all subagents run in parallel)
+
+# Wait for all subagents to complete
+WAIT FOR ALL TASKS
+
+# Merge results when all complete
+```
+
+**Execute the deterministic pagination loop (for inline or subagent execution):**
 
 ```
 PAGINATION_LOOP:
@@ -351,6 +415,29 @@ If ANY input group returns FAILED status:
    ```
 
 3. **Do NOT auto-switch.** Wait for user input before proceeding to a different trade-up.
+
+---
+
+### Step 2c — Merge subagent results (after parallel scouting completes)
+
+Once all subagent pagination tasks complete, merge their results:
+
+```
+subagent_results = [task1_output, task2_output, ...]  # All completed tasks
+
+merged_listings = {}  # key: input_group_id, value: list of listings
+
+FOR EACH result IN subagent_results:
+  item_name = result['item_name']
+  listings = result['listings']  # Already filtered by fetch_float_data
+  
+  merged_listings[item_name] = listings
+  
+  ✓ Log: "Merged [len(listings)] listings for [item_name]"
+
+# All listings are already float/price-filtered by the FetchFloatData calls in each subagent
+# No additional filtering needed here
+```
 
 ---
 
