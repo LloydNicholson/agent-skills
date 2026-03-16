@@ -135,11 +135,26 @@ If no opportunities found, tell the user and stop.
 
 ---
 
-### Step 2 — Scout Steam market for each input
+### Step 2 — Scout Steam market for each input (PARALLEL PAGINATION)
 
 ⚠️ **CRITICAL:** Pagination is mandatory. Do NOT stop after page 1 if it returns 0 results. Different pages contain different float ranges and prices. Continue paging until listings are found or market is exhausted.
 
-#### 2a. Pagination loop (mandatory with explicit state tracking)
+⚠️ **FLOATS CAN NEVER STOP THE LOOP:** The only conditions that terminate pagination are: (1) the collected listings reach the required count for the input, or (2) every listing on the active page violates the per-item price ceiling. Float filtering is only a gatekeeper—not a stopping condition. Keep paging indefinitely until you encounter one of the two terminal states above.
+
+#### 2a. Parallel input scouting (key optimization)
+
+**For Multi-type trade-ups with multiple input groups:** Instead of scouting inputs sequentially (Item A pages 1→N, then Item B pages 1→N), **spawn one subagent per input group**. Each subagent handles pagination for its assigned item in parallel.
+
+**Example:** Trade-up with 2 inputs:
+- ✅ Spawn Task 1: Scout Item A (pages loop until goal or price ceiling hit)
+- ✅ Spawn Task 2: Scout Item B (pages loop until goal or price ceiling hit)
+- 🔄 Both tasks run simultaneously
+- ⏳ Main skill waits for all tasks to complete
+- 🔗 Merge results from all tasks
+
+For **Single-type trade-ups** (10× same item), apply pagination loop once (no parallelization needed).
+
+#### 2b. Pagination loop (mandatory with explicit state tracking)
 
 ⚠️ **CRITICAL: This skill has NO page limit.** You will page indefinitely (100+, 500+ pages if needed) until one of two conditions:
 1. **Collected goal:** You have enough items → STOP
@@ -160,7 +175,58 @@ PAGINATION STATE:
 |      |                |                   |                  |        |
 ```
 
-**For each input in the opportunity, execute the deterministic pagination loop:**
+**For Multi-type trade-ups, spawn subagents (one per input group):**
+
+```
+# Spawn all inputs in parallel (all at once, not sequentially)
+
+FOR EACH input_group in opportunity.inputs:
+  SPAWN SUBAGENT TASK:
+    Agent type: task (deterministic work, can verify idempotency)
+    Prompt: "Scout the Steam market for [input.itemName] (wear: [input.wearCondition])
+             following this pagination workflow:
+             
+             - Item: [input.itemName]
+             - Wear: [input.wearCondition]
+             - Need: [input.Count] items
+             - Constraints: float ≤ [input.maxFloat], price ≤ [input.maxPrice]
+             - Output market price: R[opportunity.bestOutput.Price]
+             - Max cost per item: R[input.maxPrice]
+             
+             Pagination rules:
+             1. Start page 1, fetch pages sequentially
+             2. STOP when: (a) collected [input.Count] items, OR (b) all items on a page exceed price ceiling
+             3. NO arbitrary page limits — keep paging until one stop condition is met
+             4. Use cs2-market-bot-fetch_float_data with all parameters specified below
+             
+             Call fetch_float_data with:
+             - itemName: [input.itemName]
+             - wearCondition: [input.wearCondition]
+             - maxFloat: [input.maxFloat]
+             - maxPrice: [input.maxPrice]
+             - expectedOutputValue: [opportunity.bestOutput.Price]
+             - pageSize: 100
+             - page: <starting from 1, increment each call>
+             
+             Return a JSON with:
+             {
+               'item_name': '[input.itemName]',
+               'status': 'success' | 'shortfall',
+               'collected_count': <number>,
+               'listings': [<listing objects>],
+               'total_pages': <pages accessed>,
+               'stop_reason': 'goal_reached' | 'price_ceiling_hit',
+               'final_cost': <sum of prices>
+             }
+    Mode: background (so all subagents run in parallel)
+
+# Wait for all subagents to complete
+WAIT FOR ALL TASKS
+
+# Merge results when all complete
+```
+
+**Execute the deterministic pagination loop (for inline or subagent execution):**
 
 ```
 PAGINATION_LOOP:
@@ -243,8 +309,24 @@ PAGINATION_LOOP:
     Last checkpoint: page [checkpoint.page], [checkpoint.items_collected] items collected
     ```
 
-  Return: collected_listings
+Return: collected_listings
 ```
+
+#### 2c. Input independence & alternative sequencing
+
+- Each input group maintains its own pagination loop and state. If one group hits the price ceiling (stop_reason=`price_ceiling_hit`), mark it as blocked but **do not pause the other input groups**—keep paging the remaining inputs until they satisfy their goals or also reach their own price ceilings.
+- Once the other input groups complete, revisit the blocked group and continue scanning its alternatives (same collection/rarity) page by page, still obeying the per-item price ceiling. Float constraints should continue to be ignored as stopping conditions, even across alternatives.
+- Always log which inputs hit price ceilings, which are still searching, and the pages accessed, so the final summary can describe exactly what was found or why the trade-up cannot proceed.
+
+#### 2d. Reporting when no matches are ever found
+
+- If every input group (including all their alternatives) exhausts pages without reaching the goal and the only stop reason is a price ceiling, return a clear summary to the user that includes:
+  1. Each input’s collected count vs needed.
+  2. Pages accessed per input and whether the price ceiling was triggered.
+  3. A recommendation (e.g., “Try a different trade-up or raise the budget”) if no inputs can be satisfied.
+  4. Confirmation that float constraints were respected but never stopped the loops.
+
+#### 2e. Listing fields
 
 **Critical Enforcement Rules:**
 - ✅ You MUST log state after every FetchFloatData call
@@ -290,7 +372,7 @@ PAGINATION_LOOP:
 - ❌ "No pagination state table shown" → VIOLATION (state tracking is mandatory)
 - ❌ "I stopped at page 15 for safety" → VIOLATION (no page limit exists)
 
-#### 2c. Listing fields
+#### 2e. Listing fields
 
 Each listing has: `listingId`, `itemName`, `float`, `price`, `subtotalCents`, `feeCents`
 
@@ -351,6 +433,29 @@ If ANY input group returns FAILED status:
    ```
 
 3. **Do NOT auto-switch.** Wait for user input before proceeding to a different trade-up.
+
+---
+
+### Step 2c — Merge subagent results (after parallel scouting completes)
+
+Once all subagent pagination tasks complete, merge their results:
+
+```
+subagent_results = [task1_output, task2_output, ...]  # All completed tasks
+
+merged_listings = {}  # key: input_group_id, value: list of listings
+
+FOR EACH result IN subagent_results:
+  item_name = result['item_name']
+  listings = result['listings']  # Already filtered by fetch_float_data
+  
+  merged_listings[item_name] = listings
+  
+  ✓ Log: "Merged [len(listings)] listings for [item_name]"
+
+# All listings are already float/price-filtered by the FetchFloatData calls in each subagent
+# No additional filtering needed here
+```
 
 ---
 
