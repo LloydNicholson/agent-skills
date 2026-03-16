@@ -1,5 +1,5 @@
 ---
-name: cs2-tradeup-buyer
+name: cs2-tradeup-buyer-v2
 description: >
   Portable, MCP-first workflow to find and execute CS2 trade-up input purchases end-to-end.
   Use this skill whenever the user wants profitable trade-up scouting and optional auto-purchase
