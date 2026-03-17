@@ -1,38 +1,20 @@
 ---
 name: cs2-tradeup-buyer
 description: >
-  Portable CLI and REST API-driven workflow to scout and monitor CS2 trade-up opportunities.
-  Use this skill whenever the user wants to find profitable trade-ups, scout inputs via CLI or API, and optionally execute purchases.
+  REST API-driven workflow to scout and monitor CS2 trade-up opportunities.
+  Use this skill whenever the user wants to find profitable trade-ups, scout inputs, and optionally execute purchases.
   Triggers on: /cs2-tradeup-buyer <maxCost>, "scout tradeup under R<X>", "find and execute tradeup", 
-  "check tradeup opportunities", "run tradeup via CLI", or any request to find and monitor trade-up opportunities.
+  "check tradeup opportunities", or any request to find and monitor trade-up opportunities.
 ---
 
 # CS2 Trade-Up Buyer (Watcher)
 
-Automates the full workflow: find a target trade-up opportunity within budget constraints → submit scout-only job to API or CLI → poll execution status → ask for purchase confirmation → submit execution job to API or CLI.
-
-## CLI Integration
-
-**Recommended:** Use the bundled CLI tool for all trade-up workflows. The CLI wraps all API endpoints and provides a portable, consistent interface for scouting and executing trade-ups.
-
-- CLI location: `cs2-tradeup-cli/`
-- Usage example:
-  ```bash
-  cs2-tradeup-cli scout --maxCost 20
-  cs2-tradeup-cli execute --id <opportunityId>
-  cs2-tradeup-cli status --jobId <jobId>
-  ```
-- The CLI accepts a `--url` argument to override the API base URL (default: see CLI README).
-- See `cs2-tradeup-cli/README.md` for full documentation and examples.
-
-**When to use CLI:**
-- Prefer the CLI for local, scriptable, or agent-driven workflows.
-- Use direct API calls only if CLI is unavailable or for advanced integration.
+Automates the full workflow: find a target trade-up opportunity within budget constraints → submit scout-only job via API → poll execution status → ask for purchase confirmation → submit execution job via API.
 
 ## Portability Guarantees
 
 - Do not rely on local repository files or source code.
-- Operate only through REST API endpoints at the configured base URL or via CLI.
+- Operate only through REST API endpoints at the configured base URL.
 - Do not require users to provide credentials; assume backend handles authentication.
 - If the API base URL is not configured, ask the user to provide it.
 
@@ -56,7 +38,6 @@ Optional intent examples:
 - "scout tradeup opportunities under R10"
 - "find most profitable tradeup under R50"
 - "execute tradeup under R25"
-- "run tradeup via CLI"
 
 ---
 
@@ -66,29 +47,20 @@ Optional intent examples:
 
 The skill executes this deterministic loop:
 1. Parse user input → get parameters (budget, filters)
-2. Call `cs2-tradeup scout <maxCost>` or `GET /api/trade-ups/opportunities` → find best trade-up
-3. Call `cs2-tradeup execute <id> --scout-only` or `POST /api/trade-ups/{id}/execute?scoutOnly=true` → start async scout job
-4. Poll `cs2-tradeup status <jobId>` or `GET /api/trade-ups/executions/{jobId}` until complete
+2. Call `GET /api/trade-ups/opportunities` → find best trade-up
+3. Call `POST /api/trade-ups/{id}/execute?scoutOnly=true` → start async scout job
+4. Poll `GET /api/trade-ups/executions/{jobId}` until complete
 5. Display results (found items, costs)
 6. Ask user for confirmation
-7. Call `cs2-tradeup execute <id> --purchase` or `POST /api/trade-ups/{id}/execute?scoutOnly=false` → start purchase job (if approved)
+7. Call `POST /api/trade-ups/{id}/execute?scoutOnly=false` → start purchase job (if approved)
 8. Poll execution status until complete
 9. Report results
 
-**Key principle:** You coordinate the workflow via CLI or REST API. The API handles all scouting, market fetching, and purchase logic internally.
+**Key principle:** The skill coordinates the workflow via REST API. The API handles all scouting, market fetching, and purchase logic internally.
 
 ---
 
-## CLI and API Endpoints
-
-### CLI Tool
-- `cs2-tradeup scout <maxCost>` — List available trade-up opportunities
-- `cs2-tradeup execute <opportunityId> --purchase` — Execute with purchases
-- `cs2-tradeup status <jobId>` — Poll execution status
-- `cs2-tradeup list` — List recent executions
-- All commands accept `--api-url` to override the base URL
-
-### REST API
+## REST API Endpoints
 - `GET /api/trade-ups/opportunities` — List available trade-up opportunities
 - `POST /api/trade-ups/{id}/execute?scoutOnly=true` — Scout-only execution (no purchases)
 - `POST /api/trade-ups/{id}/execute?scoutOnly=false` — Execute with purchases
@@ -97,7 +69,7 @@ The skill executes this deterministic loop:
 
 **Async job pattern:**
 - All executions return a `jobId`.
-- Poll status via CLI or API until complete.
+- Poll status via API until complete.
 - If purchase is required, ask user for confirmation before submitting purchase job.
 
 **Scout-only parameter:**
